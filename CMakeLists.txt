@@ -17,7 +17,6 @@ set(SRCS
         src/helpers/ui.cpp
         src/helpers/keybind.cpp
         src/arrow_weight_sink.cpp
-        src/hooks/gfx_invoke_hook.cpp
         src/hooks/gfx_ei_hook.cpp
         src/helpers/racemenu_ei_driver.cpp
 )

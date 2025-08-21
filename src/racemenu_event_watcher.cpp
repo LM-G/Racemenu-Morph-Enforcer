@@ -74,7 +74,7 @@ RE::BSEventNotifyControl racemenu_event_watcher::ProcessEvent(const SKSE::ModCal
 
     if (is_racemenu_slider_event(name)) {
         LOG_DEBUG("[racemenu_event_watcher] slider event notify -> {}", name);
-        morph_updater::get().notify_slider_changed();
+        //morph_updater::get().notify_slider_changed();
     }
 
     return RE::BSEventNotifyControl::kContinue;

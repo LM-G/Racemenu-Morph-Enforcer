@@ -1,8 +1,10 @@
 #pragma once
 
 #include <atomic>
+#include <string>
 
 // forward-declare SKEE type to avoid pulling skee.h in the header
+namespace RE { class GFxMovieView; class GFxValue; class TESObjectREFR; }
 namespace SKEE { class IBodyMorphInterface; }
 
 class morph_updater {
@@ -14,37 +16,51 @@ public:
     // Enable/disable updates (racemenu_watcher toggles this with menu open/close)
     void set_enabled(bool e) { enabled_.store(e); }
 
-    // Called by racemenu_event_watcher on slider changes
-    void notify_slider_changed();
+    // Driver for gfx-EI calls (TracingExternalInterface::Callback must call this)
+    void onGfxEvent(const char* name, const RE::GFxValue* args, std::uint32_t argc) noexcept;
 
-    // Optional: adjust throttle at runtime (ms)
+    // Settings / wiring
     void set_throttle_ms(int ms) { throttle_ms_.store(ms); }
-    void set_stage2_delay_ms(int ms) { stage2_delay_ms_.store(ms); }
-
-    // SKEE hookup (called from main once you have the BodyMorph interface)
     void setMorphInterface(SKEE::IBodyMorphInterface* bmi) noexcept;
-    // model refresh that prefers SKEE if available, else falls back to vanilla
+
+    // Heavy path outside RaceMenu
     void updateModelWeight(RE::TESObjectREFR* refr) noexcept;
+
+    void onMenuClosed() noexcept {
+        primed_.store(false);
+        lastEventName_.clear();
+        lastAppliedNs_.store(-1);
+        lastWillApplyNs_.store(-1);
+        lastWasNudge_.store(false);
+    }
+
 private:
     morph_updater() = default;
 
+    static RE::GFxMovieView* currentRaceMenuMovie() noexcept;
+    static bool isRaceMenuOpen() noexcept;
 
-    // SKEE BodyMorph interface pointer (null when SKEE not present)
-    SKEE::IBodyMorphInterface* skee_bmi_{nullptr};
+    void applyNudge(RE::GFxMovieView* mv) noexcept;
+    void applyRestore(RE::GFxMovieView* mv) noexcept;
+    void applyNudgeRestore(RE::GFxMovieView* mv) noexcept;
 
-    void schedule_refresh_throttled();
-    void apply();
+    void ensureTimerThread() noexcept;
 
     // state
     std::atomic<bool> enabled_{false};
-    std::atomic<bool> throttle_scheduled_{false};
+    std::atomic<int>  throttle_ms_{100}; // default; INI may override
 
-    // timing bookkeeping (ns since epoch, -1 = unset)
-    std::atomic<long long> last_slider_ns_{-1};
-    std::atomic<long long> scheduled_ns_{-1};
-    std::atomic<long long> last_refresh_ns_{-1};
-    std::atomic<unsigned>  coalesced_count_{0};
+    std::string            lastEventName_;
+    std::atomic<long long> lastAppliedNs_{-1};
+    std::atomic<long long> lastWillApplyNs_{-1};
+    std::atomic<bool>      lastWasNudge_{false};
+    std::atomic<bool>      timerThreadRunning_{false};
 
-    std::atomic<int> throttle_ms_{250}; // delay before stage1
-    std::atomic<int> stage2_delay_ms_{100}; // delay between stage1 and stage2
+    // FYI: last arg0 seen from any EI call
+    std::atomic<double>    lastAnyArg0_{0.0};
+
+    // SKEE
+    SKEE::IBodyMorphInterface* skee_bmi_{nullptr};
+
+    std::atomic<bool>      primed_{false};   // NEW: becomes true after first real slider "Change*"
 };

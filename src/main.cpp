@@ -5,13 +5,11 @@
 #include "logger.h"
 #include "morph_updater.h"
 #include "pch.h"
-#include "racemenu_event_watcher.h"
 #include "racemenu_watcher.h"
 #include "settings.h"
 #include "skee.h"
 
 static void loadMorphInterface() {
-    LOG_INFO("[SKEE] Load BodyMorph interface...");
     if (!GetModuleHandleW(L"skee64.dll") && !GetModuleHandleW(L"skee.dll")) {
         LOG_WARN("[SKEE] skee DLL not loaded, skipping");
         return;
@@ -54,11 +52,6 @@ static void onDataLoaded() {
          ui->AddEventSink<RE::MenuOpenCloseEvent>(&racemenu_watcher::get());
      }
      LOG_INFO("DataLoaded handled; menu watcher attached.");
-
-     if (auto* src = SKSE::GetModCallbackEventSource()) {
-         LOG_INFO("[main.cpp] GetModCallbackEventSource is defined ");
-         src->AddEventSink(&racemenu_event_watcher::get());
-     }
 
     if (auto* console = RE::ConsoleLog::GetSingleton()) {
         LOG_INFO(PLUGIN_NAME ": Loaded!");

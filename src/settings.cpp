@@ -41,10 +41,10 @@ std::wstring Settings::dllStem() {
 }
 
 std::wstring Settings::resolvePluginsDir() {
-    // Assumes plugin DLL is at .../Data/SKSE/Plugins/<dll>.dll
+    // Assumes plugin DLL is at /Data/SKSE/Plugins/<dll>.dll
     const auto full = getModulePath();
     path p(full);
-    // .../Data/SKSE/Plugins
+    // /Data/SKSE/Plugins
     p = p.parent_path();
     return p.wstring();
 }
@@ -61,10 +61,10 @@ std::wstring Settings::resolveINI() {
     // keep lowercase file name based on dll stem
     const auto stem = dllStem() + L".ini";
 
-    const path preferred = path(self) / stem;  // .../Plugins/RacemenuMorphFixer/racemenumorphfixer.ini
+    const path preferred = path(self) / stem;  // /Plugins/RacemenuMorphFixer/racemenumorphfixer.ini
     if (std::filesystem::exists(preferred)) return preferred.wstring();
 
-    // fallback: .../Plugins/racemenumorphfixer.ini (flat)
+    // fallback: /Plugins/racemenumorphfixer.ini (flat)
     return (path(plug) / stem).wstring();
 }
 

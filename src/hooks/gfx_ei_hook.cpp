@@ -2,6 +2,7 @@
 
 #include "../logger.h"
 #include "../helpers/racemenu_ei_driver.h"
+#include "../morph_updater.h"
 
 #include "RE/G/GFxExternalInterface.h"
 #include "RE/G/GFxMovieView.h"
@@ -14,10 +15,8 @@ namespace {
 class TracingExternalInterface : public RE::GFxExternalInterface
 {
 public:
-    explicit TracingExternalInterface(RE::GFxExternalInterface* orig)
-        : orig_(orig)
+    TracingExternalInterface(RE::GFxExternalInterface* orig) : orig_(orig)
     {
-        // We keep a reference to the original EI while installed.
         if (orig_) {
             orig_->AddRef();
         }
@@ -33,19 +32,20 @@ public:
 
     void Callback(RE::GFxMovieView* movie, const char* name, const RE::GFxValue* args, std::uint32_t argc) override
     {
+        // (Optional) lightweight log of a few interesting calls
+        if (name) {
+            // Try to print first 2 args compactly
+            auto arg0 = (argc >= 1 && args[0].IsNumber()) ? args[0].GetNumber() : 0.0;
+            auto arg1 = (argc >= 2 && args[1].IsNumber()) ? args[1].GetNumber() : 0.0;
+            LOG_DEBUG("[gfx-ei] {}(argc={}) [0]=num:{:.3f} [1]=num:{:.3f}",
+                      name, argc, arg0, arg1);
+        }
+
         // Mirror every EI call into our observer
         helpers::racemenu_ei::observe(name, args, argc);
 
-        // (Optional) lightweight log of a few interesting calls
-        if (name) {
-            if (_stricmp(name, "ChangeWeight") == 0 || _strnicmp(name, "ChangePart", 10) == 0 || _stricmp(name, "PlaySound") == 0) {
-                // Try to print first 2 args compactly
-                auto arg0 = (argc >= 1 && args[0].IsNumber()) ? args[0].GetNumber() : 0.0;
-                auto arg1 = (argc >= 2 && args[1].IsNumber()) ? args[1].GetNumber() : 0.0;
-                LOG_DEBUG("[gfx-ei] {}(argc={}) [0]=num:{:.3f} [1]=num:{:.3f}",
-                          name, argc, arg0, arg1);
-            }
-        }
+        // Route EI to our morph cadence
+        morph_updater::get().onGfxEvent(name, args, argc);
 
         // Forward to original EI if present
         if (orig_) {
@@ -64,7 +64,7 @@ static RE::GFxExternalInterface* get_ei_addref(RE::GFxMovieView* mv)
 {
     if (!mv) return nullptr;
     auto* st = mv->GetStateAddRef(RE::GFxState::StateType::kExternalInterface);
-    return reinterpret_cast<RE::GFxExternalInterface*>(st);
+    return static_cast<RE::GFxExternalInterface*>(st);
 }
 
 } // namespace
@@ -74,33 +74,29 @@ namespace hooks::gfx_ei {
 bool enable(RE::GFxMovieView* mv)
 {
     if (!mv) return false;
-
-    // Already installed for this movie?
-    if (s_proxy && s_movie == mv) {
+    if (s_movie == mv && s_proxy) {
+        // already installed
         return true;
     }
 
-    // If installed for another movie, clean it up
-    if (s_proxy && s_movie && s_movie != mv) {
-        disable(s_movie);
-    }
-
-    auto* orig = get_ei_addref(mv); // addref'd
-    if (!orig) {
-        LOG_WARN("[gfx-ei] no ExternalInterface on movie {}", fmt::ptr(mv));
+    auto* ei = get_ei_addref(mv);
+    if (!ei) {
+        LOG_WARN("[gfx-ei] movie has no EI");
         return false;
     }
 
-    s_proxy = new TracingExternalInterface(orig);
+    // Wrap the existing EI with our tracing proxy
+    s_proxy = new TracingExternalInterface(ei);
+
+    // Point the movie at our proxy
+    mv->SetState(RE::GFxState::StateType::kExternalInterface, s_proxy);
     s_movie = mv;
 
-    // Install our proxy. SetState takes ownership of the ref-counted pointer.
-    mv->SetState(RE::GFxState::StateType::kExternalInterface, s_proxy);
-
     // Release our local addref to the original (proxy holds its own ref)
-    orig->Release();
+    ei->Release();
 
-    LOG_INFO("[gfx-ei] installed proxy EI for movie {} (orig {})", fmt::ptr(mv), fmt::ptr(s_proxy->orig_));
+    LOG_INFO("[gfx-ei] installed proxy EI for movie {} (orig {})", fmt::ptr(mv), fmt::ptr(ei));
+    LOG_INFO("[gfx-ei] enabled");
     return true;
 }
 

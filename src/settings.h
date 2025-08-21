@@ -8,8 +8,8 @@ public:
     static Settings& get() noexcept;
 
     // Discoverable paths (wide, to align with SimpleIniW + Windows APIs)
-    std::wstring plugin_dir() const { return plugin_dir_; }  // .../Data/SKSE/Plugins
-    std::wstring self_dir()   const { return self_dir_; }    // .../Data/SKSE/Plugins/<dllstem>
+    std::wstring plugin_dir() const { return plugin_dir_; }  // /Data/SKSE/Plugins
+    std::wstring self_dir()   const { return self_dir_; }    // /Data/SKSE/Plugins/<dllstem>
     std::wstring ini_path()   const { return ini_path_; }    // resolved ini (preferred in self_dir)
 
     // User-tunable values (defaults preserved if keys absent)

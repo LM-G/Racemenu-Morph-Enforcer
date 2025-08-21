@@ -30,27 +30,18 @@ RE::BSEventNotifyControl racemenu_watcher::ProcessEvent(
     const bool opening = evn->opening;
 
     morph_updater::get().set_enabled(opening);
-    if (opening) {
-        LOG_DEBUG("[racemenu_watcher] RaceMenu opened -> morph_updater enabled");
 
-        // Install EI proxy on the RaceMenu movie
-        if (auto ui = RE::UI::GetSingleton(); ui) {
-            if (auto m = ui->GetMenu(name)) {
-                if (auto* mv = m->uiMovie.get()) {
-                    if (hooks::gfx_ei::enable(mv)) {
-                        LOG_INFO("[gfx-ei] enabled");
-                    }
-                }
-            }
-        }
-    } else {
-        LOG_DEBUG("[racemenu_watcher] RaceMenu closed -> morph_updater disabled");
-
-        if (auto ui = RE::UI::GetSingleton(); ui) {
-            if (auto m = ui->GetMenu(name)) {
-                if (auto* mv = m->uiMovie.get()) {
+    // Install EI proxy on the RaceMenu movie
+    if (auto ui = RE::UI::GetSingleton(); ui) {
+        if (auto m = ui->GetMenu(name)) {
+            if (auto* mv = m->uiMovie.get()) {
+                if (opening) {
+                    LOG_DEBUG("[racemenu_watcher] RaceMenu opened -> morph_updater enabled");
+                    hooks::gfx_ei::enable(mv);
+                } else {
+                    LOG_DEBUG("[racemenu_watcher] RaceMenu closed -> morph_updater disabled");
                     hooks::gfx_ei::disable(mv);
-                    LOG_INFO("[gfx-ei] disabled");
+                    morph_updater::get().onMenuClosed();
                 }
             }
         }
