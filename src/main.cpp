@@ -1,11 +1,11 @@
 #include <SimpleIni.h>
 
-#include "arrow_weight_sink.h"
+#include "core/arrow_weight_sink.h"
+#include "core/racemenu_watcher.h"
+#include "features/morph_updater.h"
 #include "helpers/keybind.h"
 #include "logger.h"
-#include "morph_updater.h"
 #include "pch.h"
-#include "racemenu_watcher.h"
 #include "settings.h"
 #include "skee.h"
 
@@ -40,18 +40,18 @@ static void loadMorphInterface() {
     }
 
     LOG_INFO("[SKEE] BodyMorph version {}", morphInterface->GetVersion());
-    morph_updater::get().setMorphInterface(morphInterface);
+    MorphFixer::MorphUpdater::get().setMorphInterface(morphInterface);
 }
 
 static void onDataLoaded() {
-     Settings::get().load();
+    MorphFixer::Settings::get().load();
 
-     morph_updater::get().set_throttle_ms(Settings::get().throttle_ms);
+    MorphFixer::MorphUpdater::get().setThrottleMs(MorphFixer::Settings::get().throttle_ms);
 
-     if (auto* ui = RE::UI::GetSingleton()) {
-         ui->AddEventSink<RE::MenuOpenCloseEvent>(&racemenu_watcher::get());
-     }
-     LOG_INFO("DataLoaded handled; menu watcher attached.");
+    if (auto* ui = RE::UI::GetSingleton()) {
+        ui->AddEventSink<RE::MenuOpenCloseEvent>(&MorphFixer::RaceMenuWatcher::get());
+    }
+    LOG_INFO("DataLoaded handled; menu watcher attached.");
 
     if (auto* console = RE::ConsoleLog::GetSingleton()) {
         LOG_INFO(PLUGIN_NAME ": Loaded!");
@@ -66,7 +66,7 @@ static void install_weight_test_binds() {
         return;  // already installed
     }
     if (auto* mgr = RE::BSInputDeviceManager::GetSingleton()) {
-        mgr->AddEventSink(&ArrowWeightSink::get());
+        mgr->AddEventSink(&MorphFixer::ArrowWeightSink::get());
         LOG_INFO("[keybind] Arrow Up/Down mapped to 100/0");
     } else {
         LOG_WARN("[keybind] BSInputDeviceManager not available; cannot install binds");
@@ -86,14 +86,13 @@ static void onMessage(SKSE::MessagingInterface::Message* m) {
         } break;
         case SKSE::MessagingInterface::kInputLoaded: {
             // nothing
-            //install_weight_test_binds();
         } break;
         case SKSE::MessagingInterface::kPreLoadGame: {
             // nothing
         } break;
         case SKSE::MessagingInterface::kPostLoadGame:
         case SKSE::MessagingInterface::kNewGame: {
-            Settings::get().load();
+            MorphFixer::Settings::get().load();
         } break;
         default:
             break;
@@ -102,7 +101,7 @@ static void onMessage(SKSE::MessagingInterface::Message* m) {
 
 SKSEPluginLoad(const SKSE::LoadInterface* skse) {
     SKSE::Init(skse);
-    logx::init();
+    MorphFixer::Logger::init();
     SKSE::GetMessagingInterface()->RegisterListener(onMessage);
     spdlog::info(PLUGIN_NAME " loaded.");
     return true;

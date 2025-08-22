@@ -1,6 +1,6 @@
 #pragma once
 
-//Standard Library C++20
+// Standard Library C++20
 #include <algorithm>
 #include <any>
 #include <array>
@@ -100,7 +100,6 @@
 #include <vector>
 #include <version>
 
-
 #define WIN32_LEAN_AND_MEAN
 #define NOGDICAPMASKS     // CC_*, LC_*, PC_*, CP_*, TC_*, RC_
 #define NOWINSTYLES       // WS_*, CS_*, ES_*, LBS_*, SBS_*, CBS_*
@@ -131,21 +130,19 @@
 #define NODEFERWINDOWPOS  // DeferWindowPos routines
 #define NOMCX             // Modem Configuration Extensions
 
-//spdlog
-#include <spdlog/spdlog.h>
+// spdlog
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/msvc_sink.h>
+#include <spdlog/spdlog.h>
 
-//commonlibsse-ng and skse
+// commonlibsse-ng and skse
 #include <RE/Skyrim.h>
-#include <SKSE/SKSE.h>
 #include <REL/Relocation.h>
+#include <SKSE/SKSE.h>
 
-//winapi
+// winapi
 #include <ShlObj_core.h>
 #include <Windows.h>
-
-
 #include <fmt/format.h>
 
 using namespace std::literals;

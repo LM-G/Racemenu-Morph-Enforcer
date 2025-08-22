@@ -4,21 +4,21 @@ cmake_minimum_required(VERSION 3.21)
 set(CMAKE_DEBUG_POSTFIX "") # no 'd' suffix if you want clean file name
 set(PROJECT_NAME "RacemenuMorphFixer")
 set(PROJECT_AUTHOR "Pliseman")
-set(PROJECT_VERSION 1.0.0)
+set(PROJECT_VERSION 1.1.0)
 # source list
 set(SRCS
         src/main.cpp
         src/logger.cpp
-        src/morph_updater.cpp
-        src/racemenu_watcher.cpp
-        src/racemenu_event_watcher.cpp
         src/settings.cpp
+        src/features/morph_updater.cpp
+        src/core/racemenu_watcher.cpp
+        src/core/racemenu_event_watcher.cpp
+        src/core/arrow_weight_sink.cpp
+        src/core/gfx_ei_hook.cpp
+        src/core/racemenu_ei_driver.cpp
         src/helpers/string.cpp
         src/helpers/ui.cpp
         src/helpers/keybind.cpp
-        src/arrow_weight_sink.cpp
-        src/hooks/gfx_ei_hook.cpp
-        src/helpers/racemenu_ei_driver.cpp
 )
 
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES CXX)
@@ -41,7 +41,8 @@ add_commonlibsse_plugin(${PROJECT_NAME} SOURCES ${SRCS} AUTHOR ${PROJECT_AUTHOR}
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SRCS})
 
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_23)
-target_precompile_headers(${PROJECT_NAME} PRIVATE src/pch.h)
+target_include_directories(${PROJECT_NAME} PRIVATE include)
+target_precompile_headers(${PROJECT_NAME} PRIVATE include/pch.h)
 
 # Name the produced DLL file explicitly
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME ${PROJECT_NAME})
