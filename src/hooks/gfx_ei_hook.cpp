@@ -25,32 +25,32 @@ public:
     ~TracingExternalInterface() override
     {
         if (orig_) {
-            orig_->Release();
+            // orig_->Release();
             orig_ = nullptr;
         }
     }
 
     void Callback(RE::GFxMovieView* movie, const char* name, const RE::GFxValue* args, std::uint32_t argc) override
     {
-        // (Optional) lightweight log of a few interesting calls
-        if (name) {
-            // Try to print first 2 args compactly
-            auto arg0 = (argc >= 1 && args[0].IsNumber()) ? args[0].GetNumber() : 0.0;
-            auto arg1 = (argc >= 2 && args[1].IsNumber()) ? args[1].GetNumber() : 0.0;
-            LOG_DEBUG("[gfx-ei] {}(argc={}) [0]=num:{:.3f} [1]=num:{:.3f}",
-                      name, argc, arg0, arg1);
-        }
-
-        // Mirror every EI call into our observer
+        // Observe/log first for visibility
         helpers::racemenu_ei::observe(name, args, argc);
 
-        // Route EI to our morph cadence
-        morph_updater::get().onGfxEvent(name, args, argc);
+        // (Optional) lightweight printf of first args
+        if (name) {
+            auto arg0 = (argc >= 1 && args[0].IsNumber()) ? args[0].GetNumber() : 0.0;
+            auto arg1 = (argc >= 2 && args[1].IsNumber()) ? args[1].GetNumber() : 0.0;
+            auto arg2 = (argc >= 3 && args[2].IsNumber()) ? args[2].GetNumber() : 0.0;
+            LOG_DEBUG("[gfx-ei] {}(argc={}) [0]=num:{:.3f} [1]=num:{:.3f} [2]=num:{:.3f}",
+                      name, argc, arg0, arg1, arg2);
+        }
 
-        // Forward to original EI if present
+        // Let RaceMenu handle its event first (safer ordering)
         if (orig_) {
             orig_->Callback(movie, name, args, argc);
         }
+
+        // Route EI to our morph cadence AFTER original handling.
+        morph_updater::get().onGfxEvent(name, args, argc);
     }
 
     RE::GFxExternalInterface* orig_{nullptr};
@@ -91,9 +91,6 @@ bool enable(RE::GFxMovieView* mv)
     // Point the movie at our proxy
     mv->SetState(RE::GFxState::StateType::kExternalInterface, s_proxy);
     s_movie = mv;
-
-    // Release our local addref to the original (proxy holds its own ref)
-    ei->Release();
 
     LOG_INFO("[gfx-ei] installed proxy EI for movie {} (orig {})", fmt::ptr(mv), fmt::ptr(ei));
     LOG_INFO("[gfx-ei] enabled");

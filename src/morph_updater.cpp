@@ -4,8 +4,9 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
-#include <string_view>
 #include <thread>
+#include <string_view>
+#include <functional>
 
 #include "RE/A/Actor.h"
 #include "RE/G/GFxMovieView.h"
@@ -13,6 +14,10 @@
 #include "RE/P/PlayerCharacter.h"
 #include "RE/T/TESNPC.h"
 #include "RE/U/UI.h"
+
+#include "SKSE/API.h"         // for GetTaskInterface / AddUITask
+#include "SKSE/Interfaces.h"
+
 #include "helpers/racemenu_ei_driver.h"
 #include "helpers/ui.h"
 #include "logger.h"
@@ -24,8 +29,8 @@ using namespace std::string_view_literals;
 
 namespace {
     inline long long now_ns() {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
-            .count();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
     }
     inline bool contains(std::string_view s, std::string_view needle) {
         return s.find(needle) != std::string_view::npos;
@@ -36,7 +41,7 @@ namespace {
         if (auto* ti = SKSE::GetTaskInterface(); ti) {
             ti->AddUITask(std::move(fn));
         } else {
-            // Fallback: run inline (best effort; should not happen during normal runtime)
+            // Should not happen post-init, but don't crash release
             fn();
         }
     }
@@ -74,7 +79,8 @@ RE::GFxMovieView* morph_updater::currentRaceMenuMovie() noexcept {
     return nullptr;
 }
 bool morph_updater::isRaceMenuOpen() noexcept {
-    if (auto* ui = RE::UI::GetSingleton(); ui) return ui->IsMenuOpen("RaceSex Menu"sv) || ui->IsMenuOpen("RaceMenu"sv);
+    if (auto* ui = RE::UI::GetSingleton(); ui)
+        return ui->IsMenuOpen("RaceSex Menu"sv) || ui->IsMenuOpen("RaceMenu"sv);
     return false;
 }
 
@@ -85,7 +91,8 @@ void morph_updater::applyNudge(RE::GFxMovieView* mv) noexcept {
 
     double norm = 0.5;
     if (!helpers::racemenu_ei::snapshot_last_weight(norm)) {
-        if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
+        if (auto* base = player->GetActorBase())
+            norm = clamp01(base->weight / 100.0);
     }
     const double eps = 0.01;
     const double nudge = clamp01(norm - eps);
@@ -94,7 +101,6 @@ void morph_updater::applyNudge(RE::GFxMovieView* mv) noexcept {
     lastWasNudge_.store(true, std::memory_order_relaxed);
     lastAppliedNs_.store(now_ns(), std::memory_order_relaxed);
 }
-
 void morph_updater::applyRestore(RE::GFxMovieView* mv) noexcept {
     if (!mv) return;
     auto* player = RE::PlayerCharacter::GetSingleton();
@@ -102,14 +108,14 @@ void morph_updater::applyRestore(RE::GFxMovieView* mv) noexcept {
 
     double norm = 0.5;
     if (!helpers::racemenu_ei::snapshot_last_weight(norm)) {
-        if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
+        if (auto* base = player->GetActorBase())
+            norm = clamp01(base->weight / 100.0);
     }
     const bool ok = helpers::racemenu_ei::drive_changeweight_norm(mv, norm);
     LOG_DEBUG("[morph_updater] EI ChangeWeight(restore-only) -> {}", ok);
     lastWasNudge_.store(false, std::memory_order_relaxed);
     lastAppliedNs_.store(now_ns(), std::memory_order_relaxed);
 }
-
 void morph_updater::applyNudgeRestore(RE::GFxMovieView* mv) noexcept {
     if (!mv) return;
     auto* player = RE::PlayerCharacter::GetSingleton();
@@ -117,7 +123,8 @@ void morph_updater::applyNudgeRestore(RE::GFxMovieView* mv) noexcept {
 
     double norm = 0.5;
     if (!helpers::racemenu_ei::snapshot_last_weight(norm)) {
-        if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
+        if (auto* base = player->GetActorBase())
+            norm = clamp01(base->weight / 100.0);
     }
     const bool ok = helpers::racemenu_ei::nudge_then_restore_norm(mv, norm, 0.01);
     LOG_DEBUG("[morph_updater] EI ChangeWeight(nudge±1% final) -> {}", ok);
@@ -145,20 +152,20 @@ void morph_updater::ensureTimerThread() noexcept {
                     const auto last = lastAppliedNs_.load(std::memory_order_relaxed);
                     const long long minGapNs = 150LL * 1'000'000LL;
                     if (last < 0 || (now - last) >= minGapNs) {
-                        // Defer the actual GFx call to the UI thread
                         const bool wasNudge = lastWasNudge_.load(std::memory_order_relaxed);
                         post_ui([this, wasNudge] {
                             if (auto* mv = currentRaceMenuMovie(); mv && isRaceMenuOpen()) {
                                 if (wasNudge) {
-                                    applyRestore(mv);  // finish from nudge → restore-only
+                                    LOG_DEBUG("[morph_updater] ChangeWeight Operation (tail) for: <idle>");
+                                    applyRestore(mv);        // finish from nudge → restore-only
                                 } else {
-                                    applyNudgeRestore(mv);  // single-tap / balanced finish
+                                    LOG_DEBUG("[morph_updater] ChangeWeight Operation (tail) for: <idle>");
+                                    applyNudgeRestore(mv);   // single-tap / balanced finish
                                 }
                             }
                         });
                     }
-                    // Disarm regardless; if new input arrives the timer will be rescheduled
-                    lastWillApplyNs_.store(-1, std::memory_order_relaxed);
+                    lastWillApplyNs_.store(-1, std::memory_order_relaxed); // disarm
                 } else {
                     const auto remain = due - now;
                     const auto ms = std::max<long long>(1, remain / 1'000'000LL);
@@ -184,20 +191,18 @@ void morph_updater::onGfxEvent(const char* nameC, const RE::GFxValue* args, std:
     }
 
     // Steps 2–3: only "Change*" events
-    if (name.find("Change") == std::string_view::npos) return;
+    if (!contains(name, "Change"sv))
+        return;
 
     // Step 4: blacklist events we won't treat as slider changes
-    if (name == "ChangeWeight"sv || name == "ChangeRace"sv || name == "ChangeSex"sv) return;
-
-    // From this point, we know we saw a *real* RM slider change → PRIME the cadence.
-    primed_.store(true, std::memory_order_relaxed);
+    if (name == "ChangeWeight"sv || name == "ChangeRace"sv || name == "ChangeSex"sv || name == "ChangeDoubleMorph"sv || name == "ChangeHeadPart"sv)
+        return;
 
     // Step 5: cadence
     static std::mutex mu;
     std::lock_guard lk(mu);
 
-    auto* mv = currentRaceMenuMovie();
-    if (!mv || !isRaceMenuOpen()) return;
+    if (!isRaceMenuOpen()) return;
 
     const bool nameChanged = (lastEventName_ != name);
     const auto now = now_ns();
@@ -207,20 +212,21 @@ void morph_updater::onGfxEvent(const char* nameC, const RE::GFxValue* args, std:
     const auto last = lastAppliedNs_.load(std::memory_order_relaxed);
     const bool okToApplyNow = nameChanged || last < 0 || (now - last) >= thrNs;
 
-    // NEW: if not primed yet, do not act or schedule
-    if (!primed_.load(std::memory_order_relaxed)) {
-        return;
-    }
-
+    // We never touch GFx here; queue to UI thread so RaceMenu finishes handling this EI first.
     if (okToApplyNow) {
-        if (!lastWasNudge_.load(std::memory_order_relaxed)) {
-            applyNudge(mv);
-        } else {
-            applyRestore(mv);
-        }
+        const bool doNudge = !lastWasNudge_.load(std::memory_order_relaxed);
+        std::string src(name);
+        post_ui([this, doNudge, src = std::move(src)] {
+            if (auto* mv = currentRaceMenuMovie(); mv && isRaceMenuOpen()) {
+                LOG_DEBUG("[morph_updater] ChangeWeight Operation applied for: {} event", src);
+                if (doNudge) {
+                    applyNudge(mv);
+                } else {
+                    applyRestore(mv);
+                }
+            }
+        });
         lastEventName_.assign(name.data(), name.size());
-
-        LOG_DEBUG("[gfx-ei] ChangeWeight Operation applied for: {} event", lastEventName_);
     }
 
     // Always schedule the "last" cleanup tick
