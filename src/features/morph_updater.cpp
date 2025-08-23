@@ -1,6 +1,7 @@
 #include "features/morph_updater.h"
 
 #include "core/racemenu_ei_driver.h"
+#include "helpers/consts.h"
 #include "helpers/ui.h"
 #include "logger.h"
 #include "pch.h"
@@ -62,6 +63,7 @@ namespace MorphFixer {
         }
         return nullptr;
     }
+
     bool MorphUpdater::isRaceMenuOpen() noexcept {
         if (auto* ui = RE::UI::GetSingleton(); ui)
             return ui->IsMenuOpen("RaceSex Menu"sv) || ui->IsMenuOpen("RaceMenu"sv);
@@ -77,13 +79,19 @@ namespace MorphFixer {
         if (!Helpers::RaceMenuExternalInterface::snapshotLastWeight(norm)) {
             if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
         }
+
+        // Special-case: at 0.0, nudge UP by +1% instead of down
         const double eps = 0.01;
-        const double nudge = clamp01(norm - eps);
-        const bool ok = Helpers::RaceMenuExternalInterface::driveChangeWeightNorm(mv, nudge);
-        LOG_DEBUG("[MorphUpdater] EI ChangeWeight(nudge-only -1%) -> {}", ok);
+        const bool nudgeUp = (norm <= 0.0);
+        const double target = clamp01(norm + (nudgeUp ? +eps : -eps));
+
+        const bool ok = Helpers::RaceMenuExternalInterface::driveChangeWeightNorm(mv, target);
+        LOG_DEBUG("[MorphUpdater] EI ChangeWeight(nudge-only {}1%) -> {}", nudgeUp ? "+" : "-", ok);
+
         m_LastWasNudge.store(true, std::memory_order_relaxed);
         m_LastAppliedNs.store(now_ns(), std::memory_order_relaxed);
     }
+
     void MorphUpdater::applyRestore(RE::GFxMovieView* mv) noexcept {
         if (!mv) return;
         auto* player = RE::PlayerCharacter::GetSingleton();
@@ -98,6 +106,7 @@ namespace MorphFixer {
         m_LastWasNudge.store(false, std::memory_order_relaxed);
         m_LastAppliedNs.store(now_ns(), std::memory_order_relaxed);
     }
+
     void MorphUpdater::applyNudgeRestore(RE::GFxMovieView* mv) noexcept {
         if (!mv) return;
         auto* player = RE::PlayerCharacter::GetSingleton();
@@ -107,6 +116,8 @@ namespace MorphFixer {
         if (!Helpers::RaceMenuExternalInterface::snapshotLastWeight(norm)) {
             if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
         }
+        // NOTE: Helpers::RaceMenuExternalInterface::nudgeThenRestoreNorm already
+        // nudges UP when norm - eps would go below 0, so 0.0 is handled.
         const bool ok = Helpers::RaceMenuExternalInterface::nudgeThenRestoreNorm(mv, norm, 0.01);
         LOG_DEBUG("[MorphUpdater] EI ChangeWeight(nudge±1% final) -> {}", ok);
         m_LastWasNudge.store(false, std::memory_order_relaxed);
@@ -148,7 +159,8 @@ namespace MorphFixer {
                             // disarm after executing tail
                             m_LastWillApplyNs.store(-1, std::memory_order_relaxed);
                         } else {
-                            // Not enough idle gap yet; push due forward to guarantee tail will run ~150ms after last apply
+                            // Not enough idle gap yet; push due forward to guarantee tail will run ~150ms after last
+                            // apply
                             const long long newDue = last + minGapNs;
                             m_LastWillApplyNs.store(newDue, std::memory_order_relaxed);
                         }
@@ -181,14 +193,17 @@ namespace MorphFixer {
 
         // Step 4: blacklist events we won't treat as slider changes
         if (name == "ChangeWeight"sv || name == "ChangeRace"sv || name == "ChangeSex"sv ||
-            name == "ChangeDoubleMorph"sv || name == "ChangeHeadPart"sv)
+            name == "ChangeDoubleMorph"sv || name == "ChangeHeadPart"sv) {
             return;
+        }
 
         // Step 5: cadence
         static std::mutex mu;
         std::lock_guard lk(mu);
 
-        if (!isRaceMenuOpen()) return;
+        if (!isRaceMenuOpen()) {
+            return;
+        }
 
         const bool nameChanged = (m_LastEventName != name);
         const auto now = now_ns();
@@ -216,7 +231,7 @@ namespace MorphFixer {
         }
 
         // Always schedule the "last" cleanup tick
-        const long long due = now + (thr + 50) * 1'000'000LL;
+        const long long due = now + (static_cast<long long>(thr) * Helpers::Consts::NS_PER_MS);
         m_LastWillApplyNs.store(due, std::memory_order_relaxed);
         ensureTimerThread();
     }
