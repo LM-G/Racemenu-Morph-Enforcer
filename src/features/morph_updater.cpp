@@ -145,8 +145,13 @@ namespace MorphFixer {
                                     }
                                 }
                             });
+                            // disarm after executing tail
+                            m_LastWillApplyNs.store(-1, std::memory_order_relaxed);
+                        } else {
+                            // Not enough idle gap yet; push due forward to guarantee tail will run ~150ms after last apply
+                            const long long newDue = last + minGapNs;
+                            m_LastWillApplyNs.store(newDue, std::memory_order_relaxed);
                         }
-                        m_LastWillApplyNs.store(-1, std::memory_order_relaxed);  // disarm
                     } else {
                         const auto remain = due - now;
                         const auto ms = std::max<long long>(1, remain / 1'000'000LL);
