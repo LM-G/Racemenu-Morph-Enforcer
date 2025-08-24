@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21)
 set(CMAKE_DEBUG_POSTFIX "") # no 'd' suffix if you want clean file name
 set(PROJECT_NAME "RacemenuMorphFixer")
 set(PROJECT_AUTHOR "Pliseman")
-set(PROJECT_VERSION 1.1.0)
+set(PROJECT_VERSION 1.2.0)
 # source list
 set(SRCS
         src/main.cpp
