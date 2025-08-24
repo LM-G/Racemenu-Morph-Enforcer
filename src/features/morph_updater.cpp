@@ -30,6 +30,18 @@ namespace MorphFixer {
                 fn();
             }
         }
+
+        inline double read_current_norm_baseline() {
+            double norm = 0.5;
+            if (!Helpers::RaceMenuExternalInterface::snapshotLastWeight(norm)) {
+                if (auto* player = RE::PlayerCharacter::GetSingleton()) {
+                    if (auto* base = player->GetActorBase()) {
+                        norm = clamp01(base->weight / 100.0);
+                    }
+                }
+            }
+            return clamp01(norm);
+        }
     }
 
     MorphUpdater& MorphUpdater::get() {
@@ -75,15 +87,16 @@ namespace MorphFixer {
         auto* player = RE::PlayerCharacter::GetSingleton();
         if (!player) return;
 
-        double norm = 0.5;
-        if (!Helpers::RaceMenuExternalInterface::snapshotLastWeight(norm)) {
-            if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
+        // Use session baseline (prevents drift across taps)
+        double baseline = m_LastBaselineNorm.load(std::memory_order_relaxed);
+        if (baseline < 0.0 || baseline > 1.0) {
+            baseline = read_current_norm_baseline();
         }
 
-        // Special-case: at 0.0, nudge UP by +1% instead of down
+        // At 0.0, nudge UP by +1% instead of down
         const double eps = 0.01;
-        const bool nudgeUp = (norm <= 0.0);
-        const double target = clamp01(norm + (nudgeUp ? +eps : -eps));
+        const bool nudgeUp = (baseline <= 0.0);
+        const double target = clamp01(baseline + (nudgeUp ? +eps : -eps));
 
         const bool ok = Helpers::RaceMenuExternalInterface::driveChangeWeightNorm(mv, target);
         LOG_DEBUG("[MorphUpdater] EI ChangeWeight(nudge-only {}1%) -> {}", nudgeUp ? "+" : "-", ok);
@@ -94,14 +107,12 @@ namespace MorphFixer {
 
     void MorphUpdater::applyRestore(RE::GFxMovieView* mv) noexcept {
         if (!mv) return;
-        auto* player = RE::PlayerCharacter::GetSingleton();
-        if (!player) return;
-
-        double norm = 0.5;
-        if (!Helpers::RaceMenuExternalInterface::snapshotLastWeight(norm)) {
-            if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
+        // Restore to session baseline
+        double baseline = m_LastBaselineNorm.load(std::memory_order_relaxed);
+        if (baseline < 0.0 || baseline > 1.0) {
+            baseline = read_current_norm_baseline();
         }
-        const bool ok = Helpers::RaceMenuExternalInterface::driveChangeWeightNorm(mv, norm);
+        const bool ok = Helpers::RaceMenuExternalInterface::driveChangeWeightNorm(mv, baseline);
         LOG_DEBUG("[MorphUpdater] EI ChangeWeight(restore-only) -> {}", ok);
         m_LastWasNudge.store(false, std::memory_order_relaxed);
         m_LastAppliedNs.store(now_ns(), std::memory_order_relaxed);
@@ -109,16 +120,12 @@ namespace MorphFixer {
 
     void MorphUpdater::applyNudgeRestore(RE::GFxMovieView* mv) noexcept {
         if (!mv) return;
-        auto* player = RE::PlayerCharacter::GetSingleton();
-        if (!player) return;
-
-        double norm = 0.5;
-        if (!Helpers::RaceMenuExternalInterface::snapshotLastWeight(norm)) {
-            if (auto* base = player->GetActorBase()) norm = clamp01(base->weight / 100.0);
+        // Use session baseline to keep nudge+restore symmetric and drift-free
+        double baseline = m_LastBaselineNorm.load(std::memory_order_relaxed);
+        if (baseline < 0.0 || baseline > 1.0) {
+            baseline = read_current_norm_baseline();
         }
-        // NOTE: Helpers::RaceMenuExternalInterface::nudgeThenRestoreNorm already
-        // nudges UP when norm - eps would go below 0, so 0.0 is handled.
-        const bool ok = Helpers::RaceMenuExternalInterface::nudgeThenRestoreNorm(mv, norm, 0.01);
+        const bool ok = Helpers::RaceMenuExternalInterface::nudgeThenRestoreNorm(mv, baseline, 0.01);
         LOG_DEBUG("[MorphUpdater] EI ChangeWeight(nudge±1% final) -> {}", ok);
         m_LastWasNudge.store(false, std::memory_order_relaxed);
         m_LastAppliedNs.store(now_ns(), std::memory_order_relaxed);
@@ -147,13 +154,16 @@ namespace MorphFixer {
                             const bool wasNudge = m_LastWasNudge.load(std::memory_order_relaxed);
                             post_ui([this, wasNudge] {
                                 if (auto* mv = currentRaceMenuMovie(); mv && isRaceMenuOpen()) {
+                                    LOG_DEBUG("[MorphUpdater] ChangeWeight Operation (tail) for: <idle>");
                                     if (wasNudge) {
-                                        LOG_DEBUG("[MorphUpdater] ChangeWeight Operation (tail) for: <idle>");
                                         applyRestore(mv);  // finish from nudge → restore-only
                                     } else {
-                                        LOG_DEBUG("[MorphUpdater] ChangeWeight Operation (tail) for: <idle>");
                                         applyNudgeRestore(mv);  // single-tap / balanced finish
                                     }
+                                    // --- END SESSION ---
+                                    m_SessionActive.store(false, std::memory_order_relaxed);
+                                    m_LastWasNudge.store(false, std::memory_order_relaxed);
+                                    LOG_DEBUG("[MorphUpdater] Session end;");
                                 }
                             });
                             // disarm after executing tail
@@ -188,12 +198,26 @@ namespace MorphFixer {
             m_LastAnyArg0.store(args[0].GetNumber(), std::memory_order_relaxed);
         }
 
-        // Steps 2–3: only "Change*" events
+        // --- SPECIAL: ChangeWeight carries the live weight value ---
+        if (name == "ChangeWeight"sv) {
+            // arg1 is the normalized value in logs; guard against bad argc/types
+            if (argc >= 2 && args && args[1].IsNumber()) {
+                const double norm = clamp01(args[1].GetNumber());
+                // Only record origin when NOT in an update session
+                if (!m_SessionActive.load(std::memory_order_relaxed)) {
+                    m_LastBaselineNorm.store(norm, std::memory_order_relaxed);
+                    LOG_DEBUG("[MorphUpdater] primed baseline from ChangeWeight (no session): norm={:.3f}", norm);
+                }
+            }
+            return;  // never treat ChangeWeight itself as a slider-change trigger
+        }
+
+        // Steps 2–3: only "Change*" slider-ish events
         if (!contains(name, "Change"sv)) return;
 
-        // Step 4: blacklist events we won't treat as slider changes
-        if (name == "ChangeWeight"sv || name == "ChangeRace"sv || name == "ChangeSex"sv ||
-            name == "ChangeDoubleMorph"sv || name == "ChangeHeadPart"sv) {
+        // Step 4: blacklist events we won't treat as slider changes (ChangeWeight handled above)
+        if (name == "ChangeRace"sv || name == "ChangeSex"sv || name == "ChangeMenuOpen"sv ||
+            name == "ChangeMenuClose"sv) {
             return;
         }
 
@@ -213,8 +237,21 @@ namespace MorphFixer {
         const auto last = m_LastAppliedNs.load(std::memory_order_relaxed);
         const bool okToApplyNow = nameChanged || last < 0 || (now - last) >= thrNs;
 
-        // We never touch GFx here; queue to UI thread so RaceMenu finishes handling this EI first.
         if (okToApplyNow) {
+            // --- START SESSION  ---
+            bool wasActive = m_SessionActive.exchange(true, std::memory_order_relaxed);
+            if (!wasActive) {
+                // If baseline wasn't filled by a prior ChangeWeight, fall back to a snapshot now.
+                double cur = m_LastBaselineNorm.load(std::memory_order_relaxed);
+                if (cur < 0.0 || cur > 1.0) {
+                    cur = read_current_norm_baseline();
+                    m_LastBaselineNorm.store(cur, std::memory_order_relaxed);
+                    LOG_DEBUG("[MorphUpdater] Session start; baseline snapshot: norm={:.3f}", cur);
+                } else {
+                    LOG_DEBUG("[MorphUpdater] Session start; baseline already primed: norm={:.3f}", cur);
+                }
+            }
+
             const bool doNudge = !m_LastWasNudge.load(std::memory_order_relaxed);
             std::string src(name);
             post_ui([this, doNudge, src = std::move(src)] {

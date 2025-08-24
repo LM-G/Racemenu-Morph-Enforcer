@@ -40,6 +40,9 @@ namespace MorphFixer {
             m_LastAppliedNs.store(-1);
             m_LastWillApplyNs.store(-1);
             m_LastWasNudge.store(false);
+            // End any in-progress session and clear baseline
+            m_SessionActive.store(false);
+            m_LastBaselineNorm.store(-1.0);
         }
 
     private:
@@ -67,9 +70,15 @@ namespace MorphFixer {
         // FYI: last arg0 seen from any EI call
         std::atomic<double> m_LastAnyArg0{0.0};
 
+        // Baseline weight captured for the CURRENT SESSION (in [0,1]; <0 means unset)
+        std::atomic<double> m_LastBaselineNorm{-1.0};
+
         // SKEE
         SKEE::IBodyMorphInterface* m_skee_bmi{nullptr};
 
-        std::atomic<bool> m_primed{false};  // NEW: becomes true after first real slider "Change*"
+        std::atomic<bool> m_primed{false};
+
+        // --- Update-session control (NEW) ---
+        std::atomic<bool> m_SessionActive{false};
     };
 }  // namespace MorphFixer
